@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import type { AIEngine, AIResult } from "./types.ts";
+import type { AIEngine, AIResult, ProgressCallback } from "./types.ts";
 
 /**
  * Check if a command is available in PATH
@@ -95,9 +94,10 @@ export function checkForErrors(output: string): string | null {
  * Read a stream line by line, calling onLine for each non-empty line
  */
 async function readStream(
-	reader: ReadableStreamDefaultReader<Uint8Array>,
+	stream: ReadableStream<Uint8Array>,
 	onLine: (line: string) => void
 ): Promise<void> {
+	const reader = stream.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
 	try {
@@ -136,12 +136,106 @@ export async function execCommandStreaming(
 
 	// Process both stdout and stderr in parallel
 	await Promise.all([
-		readStream(proc.stdout.getReader(), onLine),
-		readStream(proc.stderr.getReader(), onLine),
+		readStream(proc.stdout, onLine),
+		readStream(proc.stderr, onLine),
 	]);
 
 	const exitCode = await proc.exited;
 	return { exitCode };
+}
+
+/**
+ * Check if a file path looks like a test file
+ */
+function isTestFile(filePath: string): boolean {
+	const lower = filePath.toLowerCase();
+	return (
+		lower.includes(".test.") ||
+		lower.includes(".spec.") ||
+		lower.includes("__tests__") ||
+		lower.includes("_test.go")
+	);
+}
+
+/**
+ * Detect the current step from a JSON output line
+ * Returns step name like "Reading code", "Implementing", etc.
+ */
+export function detectStepFromOutput(line: string): string | null {
+	// Fast path: skip non-JSON lines
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("{")) {
+		return null;
+	}
+
+	try {
+		const parsed = JSON.parse(trimmed);
+
+		// Extract specific fields for pattern matching (avoid stringifying entire object)
+		const toolName =
+			parsed.tool?.toLowerCase() ||
+			parsed.name?.toLowerCase() ||
+			parsed.tool_name?.toLowerCase() ||
+			"";
+		const command = parsed.command?.toLowerCase() || "";
+		const filePath = (parsed.file_path || parsed.filePath || parsed.path || "").toLowerCase();
+		const description = (parsed.description || "").toLowerCase();
+
+		// Check tool name first to determine operation type
+		const isReadOperation = toolName === "read" || toolName === "glob" || toolName === "grep";
+		const isWriteOperation = toolName === "write" || toolName === "edit";
+
+		// Reading code - check this early to avoid misclassifying reads of test files
+		if (isReadOperation) {
+			return "Reading code";
+		}
+
+		// Git commit
+		if (command.includes("git commit") || description.includes("git commit")) {
+			return "Committing";
+		}
+
+		// Git add/staging
+		if (command.includes("git add") || description.includes("git add")) {
+			return "Staging";
+		}
+
+		// Linting - check command for lint tools
+		if (
+			command.includes("lint") ||
+			command.includes("eslint") ||
+			command.includes("biome") ||
+			command.includes("prettier")
+		) {
+			return "Linting";
+		}
+
+		// Testing - check command for test runners
+		if (
+			command.includes("vitest") ||
+			command.includes("jest") ||
+			command.includes("bun test") ||
+			command.includes("npm test") ||
+			command.includes("pytest") ||
+			command.includes("go test")
+		) {
+			return "Testing";
+		}
+
+		// Writing tests - only for write operations to test files
+		if (isWriteOperation && isTestFile(filePath)) {
+			return "Writing tests";
+		}
+
+		// Writing/Editing code
+		if (isWriteOperation) {
+			return "Implementing";
+		}
+
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -156,4 +250,13 @@ export abstract class BaseAIEngine implements AIEngine {
 	}
 
 	abstract execute(prompt: string, workDir: string): Promise<AIResult>;
+
+	/**
+	 * Execute with streaming progress updates (optional implementation)
+	 */
+	executeStreaming?(
+		prompt: string,
+		workDir: string,
+		onProgress: ProgressCallback
+	): Promise<AIResult>;
 }
