@@ -27,7 +27,7 @@ AUTO_COMMIT=true
 # Runtime options
 SKIP_TESTS=false
 SKIP_LINT=false
-AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, or droid
+AI_ENGINE="claude"  # claude, opencode, cursor, codex, qwen, droid, or gemini
 MODEL_OVERRIDE=""   # Override default model for any engine (e.g., "sonnet", "gpt-4o-mini")
 DRY_RUN=false
 MAX_ITERATIONS=0  # 0 = unlimited
@@ -644,6 +644,11 @@ run_brownfield_task() {
         --auto medium \
         "$prompt" 2>&1 | tee "$output_file"
       ;;
+    gemini)
+      gemini --output-format stream-json \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        -p "$prompt" 2>&1 | tee "$output_file"
+      ;;
     codex)
       codex exec --full-auto \
         --json \
@@ -695,6 +700,7 @@ ${BOLD}AI ENGINE OPTIONS:${RESET}
   --codex             Use Codex CLI
   --qwen              Use Qwen-Code
   --droid             Use Factory Droid
+  --gemini            Use Gemini CLI
   --model <name>      Override default model for any engine
                       Claude: sonnet, haiku, opus
                       OpenCode: gpt-4o, gpt-4o-mini, o1, o3-mini
@@ -818,6 +824,10 @@ parse_args() {
         ;;
       --droid)
         AI_ENGINE="droid"
+        shift
+        ;;
+      --gemini)
+        AI_ENGINE="gemini"
         shift
         ;;
       --model)
@@ -1012,6 +1022,12 @@ check_requirements() {
     droid)
       if ! command -v droid &>/dev/null; then
         log_error "Factory Droid CLI not found. Install from https://docs.factory.ai/cli/getting-started/quickstart"
+        exit 1
+      fi
+      ;;
+    gemini)
+      if ! command -v gemini &>/dev/null; then
+        log_error "Gemini CLI not found."
         exit 1
       fi
       ;;
@@ -1654,6 +1670,12 @@ run_ai_command() {
       droid exec --output-format stream-json \
         --auto medium \
         "$prompt" > "$output_file" 2>&1 &
+      ;;
+    gemini)
+      # Gemini CLI: use stream-json format
+      gemini --output-format stream-json \
+        ${MODEL_OVERRIDE:+--model "$MODEL_OVERRIDE"} \
+        -p "$prompt" > "$output_file" 2>&1 &
       ;;
     codex)
       CODEX_LAST_MESSAGE_FILE="${output_file}.last"

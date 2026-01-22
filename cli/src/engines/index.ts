@@ -11,6 +11,7 @@ import { ClaudeEngine } from "./claude.ts";
 import { CodexEngine } from "./codex.ts";
 import { CursorEngine } from "./cursor.ts";
 import { DroidEngine } from "./droid.ts";
+import { GeminiEngine } from "./gemini.ts";
 import { OpenCodeEngine } from "./opencode.ts";
 import { QwenEngine } from "./qwen.ts";
 import type { AIEngine, AIEngineName } from "./types.ts";
@@ -32,6 +33,8 @@ export function createEngine(name: AIEngineName): AIEngine {
 			return new QwenEngine();
 		case "droid":
 			return new DroidEngine();
+		case "gemini":
+			return new GeminiEngine();
 		default:
 			throw new Error(`Unknown AI engine: ${name}`);
 	}
